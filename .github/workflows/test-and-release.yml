@@ -1,0 +1,230 @@
+name: Test and release
+
+# ref. https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  static_analysis:
+    name: Static analysis (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          components: rustfmt, clippy
+          override: true
+
+      - name: Check Rust version
+        run: rustc --version
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Run static analysis tests
+        shell: bash
+        run: scripts/tests.lint.sh
+
+  check_cargo_unused:
+    name: Check Cargo unused
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          components: rustfmt, clippy
+          override: true
+
+      - name: Check Rust version
+        run: rustc --version
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Check unused Cargo dependencies
+        shell: bash
+        run: scripts/tests.unused.sh
+
+  unit_tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Check Rust version
+        run: rustc --version
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Run unit tests
+        run: scripts/tests.unit.sh
+
+  release:
+    name: Release ${{ matrix.job.target }} (${{ matrix.job.os }})
+    runs-on: ${{ matrix.job.os }}
+    needs: [static_analysis, check_cargo_unused, unit_tests]
+    strategy:
+      matrix:
+        job:
+          # https://doc.rust-lang.org/nightly/rustc/platform-support.html
+          - os: ubuntu-20.04
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+
+          # https://github.com/sharkdp/fd/blob/master/.github/workflows/CICD.yml
+          #
+          # may require manual builds without cross-linker for linux
+          # https://users.rust-lang.org/t/cant-cross-compile-project-with-openssl/70922
+          - os: ubuntu-20.04
+            platform: linux
+            target: aarch64-unknown-linux-gnu
+            use-cross: true
+
+          - os: macos-latest
+            platform: darwin
+            target: x86_64-apple-darwin
+
+          - os: macos-latest
+            platform: darwin
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # https://github.com/sharkdp/fd/blob/master/.github/workflows/CICD.yml
+      # https://github.com/cross-rs/cross/wiki/Recipes#openssl
+      - name: Install OS dependencies
+        shell: bash
+        run: |
+          case ${{ matrix.job.target }} in
+            arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
+            aarch64-unknown-linux-gnu) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
+          esac
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: ${{ matrix.job.target }}
+          override: true
+
+      - name: Show version information (Rust, cargo, GCC)
+        shell: bash
+        run: |
+          gcc --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
+
+      - name: Set cargo cmd
+        shell: bash
+        run: echo "CARGO_CMD=cargo" >> $GITHUB_ENV
+
+      - name: Set cargo cmd to cross
+        shell: bash
+        if: ${{ matrix.job.use-cross == true }}
+        run: echo "CARGO_CMD=cross" >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.job.os }}-${{ matrix.job.target }}
+
+      - name: Install cross
+        if: ${{ matrix.job.use-cross == true }}
+        run: cargo install cross
+
+      - name: Build
+        run: ${{ env.CARGO_CMD }} build --release --target=${{ matrix.job.target }} --bin aws-dev-machine
+
+      - name: Compress binaries
+        id: release_artifacts
+        env:
+          PLATFORM_NAME: ${{ matrix.job.platform }}
+          TARGET: ${{ matrix.job.target }}
+        shell: bash
+        run: |
+          if [ "$PLATFORM_NAME" == "linux" ]; then
+
+            cp ./target/${TARGET}/release/aws-dev-machine aws-dev-machine.${TARGET}
+            echo "file_name_aws_dev_machine=aws-dev-machine.${TARGET}" >> $GITHUB_OUTPUT
+            tar -czvf aws-dev-machine.${TARGET}.tar.gz -C ./target/${TARGET}/release aws-dev-machine
+            echo "file_name_aws_dev_machine_tar_gz=aws-dev-machine.${TARGET}.tar.gz" >> $GITHUB_OUTPUT
+
+          elif [ "$PLATFORM_NAME" == "darwin" ]; then
+
+            cp ./target/${TARGET}/release/aws-dev-machine aws-dev-machine.${TARGET}
+            echo "file_name_aws_dev_machine=aws-dev-machine.${TARGET}" >> $GITHUB_OUTPUT
+            gtar -czvf aws-dev-machine.${TARGET}.tar.gz -C ./target/${TARGET}/release aws-dev-machine
+            echo "file_name_aws_dev_machine_tar_gz=aws-dev-machine.${TARGET}.tar.gz" >> $GITHUB_OUTPUT
+
+          else
+
+            echo "skipping $PLATFORM_NAME"
+
+          fi
+
+      # release tip from latest commits
+      # https://github.com/softprops/action-gh-release
+      # https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
+      - name: Release latest
+        uses: softprops/action-gh-release@v1
+        if: ${{ github.ref == 'refs/heads/main' }}
+        with:
+          name: Latest release
+          tag_name: latest
+          prerelease: true
+          body: Latest builds from the last commit.
+          files: |
+            ${{ steps.release_artifacts.outputs.file_name_aws_dev_machine }}
+            ${{ steps.release_artifacts.outputs.file_name_aws_dev_machine_tar_gz }}
+
+      # release only for tags
+      # https://github.com/softprops/action-gh-release
+      # https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
+      - name: Release tag
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          prerelease: true
+          body: Release builds for ${{ github.ref_name }}.
+          files: |
+            ${{ steps.release_artifacts.outputs.file_name_aws_dev_machine }}
+            ${{ steps.release_artifacts.outputs.file_name_aws_dev_machine_tar_gz }}
