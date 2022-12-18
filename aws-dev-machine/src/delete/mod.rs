@@ -174,7 +174,7 @@ pub fn execute(
         )?;
 
         let cmk_id = aws_resources.kms_cmk_id.unwrap();
-        rt.block_on(kms_manager.schedule_to_delete(cmk_id.as_str()))
+        rt.block_on(kms_manager.schedule_to_delete(cmk_id.as_str(), 7))
             .unwrap();
     }
 
