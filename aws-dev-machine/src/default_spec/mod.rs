@@ -22,6 +22,15 @@ pub fn command() -> Command {
                 .default_value("info"),
         )
         .arg(
+            Arg::new("REGION")
+                .long("region")
+                .short('r')
+                .help("Sets the AWS region for API calls/endpoints")
+                .required(true)
+                .num_args(1)
+                .default_value("us-west-2"),
+        )
+        .arg(
             Arg::new("ARCH")
                 .long("arch")
                 .short('a')
@@ -80,6 +89,7 @@ pub fn command() -> Command {
 
 pub struct Options {
     pub log_level: String,
+    pub region: String,
     pub arch: String,
     pub os: String,
     pub instance_mode: String,
@@ -95,6 +105,7 @@ pub fn execute(opts: Options) -> io::Result<()> {
     );
 
     let spec = aws_dev_machine::Spec::default(
+        &opts.region,
         &opts.arch,
         &opts.os,
         &opts.aad_tag,

@@ -232,6 +232,7 @@ impl StackName {
 
 impl Spec {
     pub fn default(
+        region: &str,
         arch: &str,
         os: &str,
         aad_tag: &str,
@@ -254,9 +255,9 @@ impl Spec {
             aad_tag: aad_tag.to_string(),
 
             aws_resources: Some(AWSResources {
-                region: String::from("us-west-2"),
+                region: region.to_string(),
                 bucket: format!(
-                    "dev-machine-{}-{}",
+                    "dev-machine-{}-{}-{region}",
                     id_manager::time::timestamp(6),
                     id_manager::system::string(7)
                 ), // [year][month][date]-[system host-based id]

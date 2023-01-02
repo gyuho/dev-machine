@@ -26,6 +26,7 @@ fn main() {
                     .get_one::<String>("LOG_LEVEL")
                     .unwrap_or(&String::from("info"))
                     .clone(),
+                region: sub_matches.get_one::<String>("REGION").unwrap().clone(),
                 instance_mode: sub_matches
                     .get_one::<String>("INSTANCE_MODE")
                     .unwrap()
