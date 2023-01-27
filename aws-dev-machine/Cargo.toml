@@ -2,7 +2,7 @@
 name = "aws-dev-machine"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.66"
+rust-version = "1.67"
 readme = "README.md"
 
 [[bin]]
@@ -10,10 +10,10 @@ name = "aws-dev-machine"
 path = "src/main.rs"
 
 [dependencies]
-aws-manager = { version = "0.23.1", features = ["cloudformation", "ec2", "kms", "s3", "sts"] } # https://crates.io/crates/aws-manager
-aws-sdk-cloudformation = "0.23.0" # https://github.com/awslabs/aws-sdk-rust/releases
-aws-sdk-ec2 = "0.23.0" # https://github.com/awslabs/aws-sdk-rust/releases
-clap = { version = "4.1.1", features = ["cargo", "derive"] } # https://github.com/clap-rs/clap
+aws-manager = { version = "0.24.0", features = ["cloudformation", "ec2", "kms", "s3", "sts"] } # https://crates.io/crates/aws-manager
+aws-sdk-cloudformation = "0.24.0" # https://github.com/awslabs/aws-sdk-rust/releases
+aws-sdk-ec2 = "0.24.0" # https://github.com/awslabs/aws-sdk-rust/releases
+clap = { version = "4.1.4", features = ["cargo", "derive"] } # https://github.com/clap-rs/clap
 compress-manager = "0.0.4"
 crossterm = "0.25.0"
 dialoguer = "0.10.2"
@@ -24,7 +24,7 @@ log = "0.4.17"
 random-manager = "0.0.2"
 rust-embed = "6.4.2"
 serde = { version = "1.0.152", features = ["derive"] }
-serde_yaml = "0.9.16" # https://github.com/dtolnay/serde-yaml/releases
+serde_yaml = "0.9.17" # https://github.com/dtolnay/serde-yaml/releases
 tokio = { version = "1.24.2", features = ["full"] } # https://github.com/tokio-rs/tokio/releases
 
 [dev-dependencies]
