@@ -139,6 +139,10 @@ Parameters:
     Default: "elastic"
     Description: Set "elastic" to allocate Elastic IP.
 
+  AsgName:
+    Type: String
+    Description: Unique identifier for this Asg.
+
   AsgMinInstancesInService:
     Type: Number
     Description: Minimum instances in service for update.
@@ -319,6 +323,8 @@ Resources:
               --id-tag-value=${Id} \
               --kind-tag-key=Kind \
               --kind-tag-value=aws-volume-provisioner \
+              --asg-tag-key=autoscaling:groupName \
+              --asg-tag-value=${AsgName} \
               --volume-type=${VolumeType} \
               --volume-size=${VolumeSize} \
               --volume-iops=${VolumeIops} \
@@ -366,7 +372,8 @@ Resources:
           - AlarmNotification
           - ScheduledActions
     Properties:
-      AutoScalingGroupName: !Join ["-", [!Ref Id, !Ref Arch]]
+      # AutoScalingGroupName: !Join ["-", [!Ref Id, !Ref Arch]]
+      AutoScalingGroupName: !Ref AsgName
       MinSize: !Ref AsgMinSize
       MaxSize: !Ref AsgMaxSize
       DesiredCapacity: !Ref AsgDesiredCapacity

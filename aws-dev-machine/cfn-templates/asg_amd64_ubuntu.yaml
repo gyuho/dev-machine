@@ -139,6 +139,10 @@ Parameters:
     Default: "elastic"
     Description: Set "elastic" to allocate Elastic IP.
 
+  AsgName:
+    Type: String
+    Description: Unique identifier for this Asg.
+
   AsgMinInstancesInService:
     Type: Number
     Description: Minimum instances in service for update.
@@ -297,8 +301,8 @@ Resources:
               sudo mv /tmp/amazon-ssm-agent-10-restart-always.conf /etc/systemd/system/snap.amazon-ssm-agent.amazon-ssm-agent.service.d/10-restart-always.conf
               sudo systemctl start --no-block snap.amazon-ssm-agent.amazon-ssm-agent.service
 
-              # https://github.com/gyuho/volume-manager/releases
-              wget https://github.com/gyuho/volume-manager/releases/download/latest/aws-volume-provisioner.x86_64-unknown-linux-gnu
+              # https://github.com/ava-labs/volume-manager/releases
+              wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://github.com/ava-labs/volume-manager/releases/download/latest/aws-volume-provisioner.x86_64-unknown-linux-gnu
               mv ./aws-volume-provisioner.x86_64-unknown-linux-gnu /tmp/aws-volume-provisioner
               chmod +x /tmp/aws-volume-provisioner
               /tmp/aws-volume-provisioner \
@@ -307,6 +311,8 @@ Resources:
               --id-tag-value=${Id} \
               --kind-tag-key=Kind \
               --kind-tag-value=aws-volume-provisioner \
+              --asg-tag-key=autoscaling:groupName \
+              --asg-tag-value=${AsgName} \
               --volume-type=${VolumeType} \
               --volume-size=${VolumeSize} \
               --volume-iops=${VolumeIops} \
@@ -316,12 +322,12 @@ Resources:
               --filesystem-name=ext4 \
               --mount-directory-path=/data
 
-              # https://github.com/gyuho/ip-manager/releases
+              # https://github.com/ava-labs/ip-manager/releases
               if [[ ${IpMode} == "elastic" ]]; then
                 sudo rm -f ./aws-ip-provisioner.x86_64-unknown-linux-gnu
                 sudo rm -f /tmp/aws-ip-provisioner
                 sudo rm -f /usr/local/bin/aws-ip-provisioner
-                wget https://github.com/gyuho/ip-manager/releases/download/latest/aws-ip-provisioner.x86_64-unknown-linux-gnu
+                wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://github.com/ava-labs/ip-manager/releases/download/latest/aws-ip-provisioner.x86_64-unknown-linux-gnu
                 mv ./aws-ip-provisioner.x86_64-unknown-linux-gnu /tmp/aws-ip-provisioner
                 chmod +x /tmp/aws-ip-provisioner
                 sudo mv /tmp/aws-ip-provisioner /usr/local/bin/aws-ip-provisioner
@@ -354,7 +360,8 @@ Resources:
           - AlarmNotification
           - ScheduledActions
     Properties:
-      AutoScalingGroupName: !Join ["-", [!Ref Id, !Ref Arch]]
+      # AutoScalingGroupName: !Join ["-", [!Ref Id, !Ref Arch]]
+      AutoScalingGroupName: !Ref AsgName
       MinSize: !Ref AsgMinSize
       MaxSize: !Ref AsgMaxSize
       DesiredCapacity: !Ref AsgDesiredCapacity

@@ -502,6 +502,10 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         }
 
         parameters.push(build_param(
+            "AsgName",
+            format!("{}-{}", spec.id, spec.machine.arch).as_str(),
+        ));
+        parameters.push(build_param(
             "AsgDesiredCapacity",
             format!("{}", desired_capacity).as_str(),
         ));
