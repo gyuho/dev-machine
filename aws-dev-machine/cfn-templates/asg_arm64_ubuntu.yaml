@@ -262,21 +262,35 @@ Resources:
               set -xeu
 
               export DEBIAN_FRONTEND=noninteractive
-              sudo apt-get update -y \
-              && sudo apt-get upgrade -y \
-              && sudo apt-get install -y \
-              tmux zsh \
-              curl wget \
-              unzip zip gzip tar \
-              libssl-dev \
-              python3-pip python-setuptools \
-              pkg-config \
-              protobuf-compiler
 
-              curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscli.v2.zip"
-              unzip awscli.v2.zip
+              while [ 1 ]; do
+                sudo apt-get update -y \
+                && sudo apt-get upgrade -y \
+                && sudo apt-get install -y \
+                tmux zsh \
+                curl wget \
+                unzip zip gzip tar \
+                libssl-dev \
+                python3-pip python-setuptools \
+                pkg-config \
+                protobuf-compiler
+                if [ $? = 0 ]; then break; fi; # check return value, break if successful (0)
+                sleep 2s;
+              done;
+
+              # http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+              export LINUX_ARCH_TYPE=$(uname -m)
+              echo LINUX_ARCH_TYPE: ${!LINUX_ARCH_TYPE}
+              while [ 1 ]; do
+                sudo rm -f ./awscli-exe-linux-${!LINUX_ARCH_TYPE}.zip || true;
+                wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://awscli.amazonaws.com/awscli-exe-linux-${!LINUX_ARCH_TYPE}.zip
+                if [ $? = 0 ]; then break; fi; # check return value, break if successful (0)
+                sleep 2s;
+              done;
+              unzip ./awscli-exe-linux-${!LINUX_ARCH_TYPE}.zip
               sudo ./aws/install
               /usr/local/bin/aws --version
+
               aws s3 ls s3://${S3BucketName}/
 
               # https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-ubuntu.html
@@ -304,8 +318,8 @@ Resources:
               --id-tag-value=${Id} \
               --kind-tag-key=Kind \
               --kind-tag-value=aws-volume-provisioner \
+              --ec2-tag-asg-name-key=ASG_NAME \
               --asg-tag-key=autoscaling:groupName \
-              --asg-tag-value=${AsgName} \
               --volume-type=${VolumeType} \
               --volume-size=${VolumeSize} \
               --volume-iops=${VolumeIops} \
@@ -336,8 +350,8 @@ Resources:
                 --id-tag-value=${Id} \
                 --kind-tag-key=Kind \
                 --kind-tag-value=aws-ip-provisioner \
+                --ec2-tag-asg-name-key=ASG_NAME \
                 --asg-tag-key=autoscaling:groupName \
-                --asg-tag-value=${AsgName} \
                 --mounted-eip-file-path=/data/eip.yaml
               else
                 echo "skipping allocating elastic IP address..."
@@ -369,8 +383,11 @@ Resources:
         - Granularity: "1Minute"
       Tags:
         - Key: Name
+          Value: !Ref AsgName
           PropagateAtLaunch: true
-          Value: !Join ["-", [!Ref Id, !Ref Arch]]
+        - Key: ASG_NAME
+          Value: !Ref AsgName
+          PropagateAtLaunch: true
         - Key: ID
           PropagateAtLaunch: true
           Value: !Ref Id

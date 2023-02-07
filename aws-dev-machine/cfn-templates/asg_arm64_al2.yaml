@@ -329,8 +329,8 @@ Resources:
               --id-tag-value=${Id} \
               --kind-tag-key=Kind \
               --kind-tag-value=aws-volume-provisioner \
+              --ec2-tag-asg-name-key=ASG_NAME \
               --asg-tag-key=autoscaling:groupName \
-              --asg-tag-value=${AsgName} \
               --volume-type=${VolumeType} \
               --volume-size=${VolumeSize} \
               --volume-iops=${VolumeIops} \
@@ -361,8 +361,8 @@ Resources:
                 --id-tag-value=${Id} \
                 --kind-tag-key=Kind \
                 --kind-tag-value=aws-ip-provisioner \
+                --ec2-tag-asg-name-key=ASG_NAME \
                 --asg-tag-key=autoscaling:groupName \
-                --asg-tag-value=${AsgName} \
                 --mounted-eip-file-path=/data/eip.yaml
               else
                 echo "skipping allocating elastic IP address..."
@@ -394,8 +394,11 @@ Resources:
         - Granularity: "1Minute"
       Tags:
         - Key: Name
+          Value: !Ref AsgName
           PropagateAtLaunch: true
-          Value: !Join ["-", [!Ref Id, !Ref Arch]]
+        - Key: ASG_NAME
+          Value: !Ref AsgName
+          PropagateAtLaunch: true
         - Key: ID
           PropagateAtLaunch: true
           Value: !Ref Id
