@@ -386,7 +386,7 @@ impl Spec {
 fn test_spec() {
     let _ = env_logger::builder().is_test(true).try_init();
 
-    let id = random_manager::string(10);
+    let id = random_manager::secure_string(10);
     let bucket = format!("test-{}", id_manager::time::timestamp(8));
 
     let contents = format!(
