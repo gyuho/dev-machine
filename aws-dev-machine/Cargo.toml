@@ -10,7 +10,7 @@ name = "aws-dev-machine"
 path = "src/main.rs"
 
 [dependencies]
-aws-manager = { version = "0.24.12", features = ["cloudformation", "ec2", "kms", "s3", "sts"] } # https://crates.io/crates/aws-manager
+aws-manager = { version = "0.24.14", features = ["cloudformation", "ec2", "kms", "s3", "sts"] } # https://crates.io/crates/aws-manager
 aws-sdk-cloudformation = "0.24.0" # https://github.com/awslabs/aws-sdk-rust/releases
 aws-sdk-ec2 = "0.24.0" # https://github.com/awslabs/aws-sdk-rust/releases
 clap = { version = "4.1.6", features = ["cargo", "derive"] } # https://github.com/clap-rs/clap
