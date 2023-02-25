@@ -357,6 +357,15 @@ Resources:
                 echo "skipping allocating elastic IP address..."
               fi;
 
+              sudo timedatectl set-ntp on
+
+              # e.g.,
+              # "Accept error: accept tcp [::]:9650: accept4: too many open files; retrying in 1s"
+              sudo echo "* hard nofile 1000000" >> /etc/security/limits.conf
+              sudo echo "* soft nofile 1000000" >> /etc/security/limits.conf
+              sudo sysctl -w fs.file-max=1000000
+              sudo sysctl -p
+
   # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-as-group.html
   ASG:
     Type: AWS::AutoScaling::AutoScalingGroup
