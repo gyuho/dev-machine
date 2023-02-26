@@ -449,6 +449,14 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         ),
         build_param("IpMode", &spec.machine.ip_mode),
         build_param(
+            "InstanceMode",
+            if is_spot_instance {
+                "spot"
+            } else {
+                "on-demand"
+            },
+        ),
+        build_param(
             "OnDemandPercentageAboveBaseCapacity",
             format!("{}", on_demand_pct).as_str(),
         ),
