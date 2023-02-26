@@ -31,9 +31,8 @@ pub fn command() -> Command {
                 .default_value("us-west-2"),
         )
         .arg(
-            Arg::new("ARCH")
-                .long("arch")
-                .short('a')
+            Arg::new("ARCH_TYPE")
+                .long("arch-type")
                 .help("Sets the machine architecture")
                 .required(true)
                 .num_args(1)
@@ -41,14 +40,13 @@ pub fn command() -> Command {
                 .default_value(aws_dev_machine::ARCH_AMD64),
         )
         .arg(
-            Arg::new("OS")
-                .long("os")
-                .short('o')
-                .help("Sets the machine OS")
+            Arg::new("RUST_OS_TYPE")
+                .long("rust-os-type")
+                .help("Sets Rust OS type")
                 .required(true)
                 .num_args(1)
-                .value_parser([aws_dev_machine::OS_UBUNTU, aws_dev_machine::OS_AL2])
-                .default_value(aws_dev_machine::OS_UBUNTU),
+                .value_parser(["ubuntu20.04"])
+                .default_value("ubuntu20.04"),
         )
         .arg(
             Arg::new("INSTANCE_MODE")
@@ -90,8 +88,8 @@ pub fn command() -> Command {
 pub struct Options {
     pub log_level: String,
     pub region: String,
-    pub arch: String,
-    pub os: String,
+    pub arch_type: String,
+    pub rust_os_type: String,
     pub instance_mode: String,
     pub ip_mode: String,
     pub aad_tag: String,
@@ -106,8 +104,8 @@ pub fn execute(opts: Options) -> io::Result<()> {
 
     let spec = aws_dev_machine::Spec::default(
         &opts.region,
-        &opts.arch,
-        &opts.os,
+        &opts.arch_type,
+        &opts.rust_os_type,
         &opts.aad_tag,
         opts.instance_mode,
         opts.ip_mode,

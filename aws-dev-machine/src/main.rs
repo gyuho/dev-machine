@@ -33,8 +33,11 @@ fn main() {
                     .clone(),
                 ip_mode: sub_matches.get_one::<String>("IP_MODE").unwrap().clone(),
                 aad_tag: sub_matches.get_one::<String>("AAD_TAG").unwrap().clone(),
-                arch: sub_matches.get_one::<String>("ARCH").unwrap().clone(),
-                os: sub_matches.get_one::<String>("OS").unwrap().clone(),
+                arch_type: sub_matches.get_one::<String>("ARCH_TYPE").unwrap().clone(),
+                rust_os_type: sub_matches
+                    .get_one::<String>("RUST_OS_TYPE")
+                    .unwrap()
+                    .clone(),
                 spec_file_path: sub_matches
                     .get_one::<String>("SPEC_FILE_PATH")
                     .unwrap()

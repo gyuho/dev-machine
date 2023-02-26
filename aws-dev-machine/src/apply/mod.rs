@@ -446,7 +446,6 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
                 .clone()
                 .unwrap(),
         ),
-        build_param("AsgSpotInstance", format!("{}", is_spot_instance).as_str()),
         build_param("IpMode", &spec.machine.ip_mode),
         build_param(
             "OnDemandPercentageAboveBaseCapacity",
@@ -454,7 +453,10 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         ),
     ]);
 
-    asg_parameters.push(build_param("Arch", &spec.machine.arch));
+    asg_parameters.push(build_param("ArchType", &spec.machine.arch_type));
+    if spec.machine.arch_type == "arm64" && spec.machine.rust_os_type != "al2" {
+        asg_parameters.push(build_param("RustOsType", "ubuntu20.04"));
+    }
     if !spec.machine.instance_types.is_empty() {
         let instance_types = spec.machine.instance_types.clone();
         asg_parameters.push(build_param("InstanceTypes", &instance_types.join(",")));
@@ -473,11 +475,7 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
             ResetColor
         )?;
 
-        let cloudformation_asg_yaml = Asset::get(&format!(
-            "cfn-templates/asg_{}_{}.yaml",
-            spec.machine.arch, spec.machine.os
-        ))
-        .unwrap();
+        let cloudformation_asg_yaml = Asset::get("cfn-templates/asg_ubuntu.yaml").unwrap();
         let cloudformation_asg_tmpl =
             std::str::from_utf8(cloudformation_asg_yaml.data.as_ref()).unwrap();
         let cloudformation_asg_stack_name = aws_resources.cloudformation_asg.clone().unwrap();
@@ -488,13 +486,13 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         let mut parameters = asg_parameters.clone();
 
         // TODO: remove this... doesn't work for amd64 and other regions
-        if aws_resources.region == "us-west-2" && spec.machine.os == "al2" {
+        if aws_resources.region == "us-west-2" && spec.machine.rust_os_type == "al2" {
             // manually overwrite to use latest kernel
-            if spec.machine.arch == "amd64" {
+            if spec.machine.arch_type == "amd64" {
                 // 64-bit AMD with Kernel 5.10
                 // "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2" returns Kernel 4.14
                 parameters.push(build_param("ImageId", "ami-02b92c281a4d3dc79"));
-            } else if spec.machine.arch == "arm64" {
+            } else if spec.machine.arch_type == "arm64" {
                 // 64-bit Arm with Kernel 5.10
                 // "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2" returns Kernel 4.14
                 parameters.push(build_param("ImageId", "ami-0100e0d6026a6c58d"));
@@ -503,7 +501,7 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
 
         parameters.push(build_param(
             "AsgName",
-            format!("{}-{}", spec.id, spec.machine.arch).as_str(),
+            format!("{}-{}", spec.id, spec.machine.arch_type).as_str(),
         ));
         parameters.push(build_param(
             "AsgDesiredCapacity",
@@ -613,10 +611,10 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         f.set_permissions(PermissionsExt::from_mode(0o444)).unwrap();
 
         let user_name = {
-            if spec.machine.os == aws_dev_machine::OS_AL2 {
-                aws_dev_machine::OS_AL2_USER_NAME
+            if spec.machine.rust_os_type == "al2" {
+                "ec2-user"
             } else {
-                aws_dev_machine::OS_UBUNTU_USER_NAME
+                "ubuntu"
             }
         };
 
