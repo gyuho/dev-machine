@@ -137,7 +137,7 @@ pub fn execute(opts: Options) -> io::Result<()> {
     execute!(
         stdout(),
         SetForegroundColor(Color::Magenta),
-        Print(format!("\ncat {}\n", opts.spec_file_path)),
+        Print(format!("\nvi {}\n", opts.spec_file_path)),
         ResetColor
     )?;
     println!();
