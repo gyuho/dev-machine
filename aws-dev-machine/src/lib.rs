@@ -145,8 +145,9 @@ impl Spec {
         arch_type: &str,
         rust_os_type: &str,
         aad_tag: &str,
-        instance_mode: String,
-        ip_mode: String,
+        instance_mode: &str,
+        instance_size: &str,
+        ip_mode: &str,
     ) -> io::Result<Self> {
         Ok(Self {
             id: id_manager::time::with_prefix("dev-machine"),
@@ -166,9 +167,10 @@ impl Spec {
                 machines: 1,
                 arch_type: arch_type.to_string(),
                 rust_os_type: rust_os_type.to_string(),
-                instance_types: ec2::default_instance_types(region, arch_type, "2xlarge").unwrap(),
-                instance_mode,
-                ip_mode,
+                instance_types: ec2::default_instance_types(region, arch_type, instance_size)
+                    .unwrap(),
+                instance_mode: instance_mode.to_string(),
+                ip_mode: ip_mode.to_string(),
             },
         })
     }

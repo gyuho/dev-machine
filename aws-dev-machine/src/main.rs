@@ -31,6 +31,10 @@ fn main() {
                     .get_one::<String>("INSTANCE_MODE")
                     .unwrap()
                     .clone(),
+                instance_size: sub_matches
+                    .get_one::<String>("INSTANCE_SIZE")
+                    .unwrap_or(&String::from("2xlarge"))
+                    .clone(),
                 ip_mode: sub_matches.get_one::<String>("IP_MODE").unwrap().clone(),
                 aad_tag: sub_matches.get_one::<String>("AAD_TAG").unwrap().clone(),
                 arch_type: sub_matches.get_one::<String>("ARCH_TYPE").unwrap().clone(),

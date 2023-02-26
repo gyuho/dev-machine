@@ -58,6 +58,15 @@ pub fn command() -> Command {
                 .default_value("spot"),
         )
         .arg(
+            Arg::new("INSTANCE_SIZE")
+                .long("instance-size")
+                .help("Sets instance size")
+                .required(false)
+                .num_args(1)
+                .value_parser(["large", "2xlarge", "4xlarge", "8xlarge"])
+                .default_value("2xlarge"),
+        )
+        .arg(
             Arg::new("IP_MODE")
                 .long("ip-mode")
                 .help("Sets IP mode to provision EC2 elastic IPs for all nodes")
@@ -91,6 +100,7 @@ pub struct Options {
     pub arch_type: String,
     pub rust_os_type: String,
     pub instance_mode: String,
+    pub instance_size: String,
     pub ip_mode: String,
     pub aad_tag: String,
     pub spec_file_path: String,
@@ -107,8 +117,9 @@ pub fn execute(opts: Options) -> io::Result<()> {
         &opts.arch_type,
         &opts.rust_os_type,
         &opts.aad_tag,
-        opts.instance_mode,
-        opts.ip_mode,
+        &opts.instance_mode,
+        &opts.instance_size,
+        &opts.ip_mode,
     )
     .unwrap();
     spec.validate()?;

@@ -454,9 +454,17 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
     ]);
 
     asg_parameters.push(build_param("ArchType", &spec.machine.arch_type));
-    if spec.machine.arch_type == "arm64" && spec.machine.rust_os_type != "al2" {
+    if spec.machine.rust_os_type != "al2" {
+        asg_parameters.push(build_param(
+            "ImageIdSsmParameter",
+            &format!(
+                "/aws/service/canonical/ubuntu/server/20.04/stable/current/{}/hvm/ebs-gp2/ami-id",
+                spec.machine.arch_type
+            ),
+        ));
         asg_parameters.push(build_param("RustOsType", "ubuntu20.04"));
     }
+
     if !spec.machine.instance_types.is_empty() {
         let instance_types = spec.machine.instance_types.clone();
         asg_parameters.push(build_param("InstanceTypes", &instance_types.join(",")));
