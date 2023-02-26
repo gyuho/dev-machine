@@ -354,7 +354,8 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
             build_param("PublicSubnetCidr1", "10.0.64.0/19"),
             build_param("PublicSubnetCidr2", "10.0.128.0/19"),
             build_param("PublicSubnetCidr3", "10.0.192.0/19"),
-            build_param("IngressIpv4Range", "0.0.0.0/0"),
+            build_param("SshIngressIpv4Range", "0.0.0.0/0"),
+            build_param("HttpIngressIpv4Range", "0.0.0.0/0"),
         ]);
         rt.block_on(cloudformation_manager.create_stack(
             vpc_stack_name.as_str(),
