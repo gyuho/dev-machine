@@ -426,9 +426,6 @@ Resources:
         - Key: INSTANCE_MODE
           Value: !Ref InstanceMode
           PropagateAtLaunch: true
-        - Key: ASG_SPOT_INSTANCE
-          PropagateAtLaunch: true
-          Value: !Ref AsgSpotInstance
         - Key: KMS_CMK_ARN
           Value: !Ref KmsCmkArn
           PropagateAtLaunch: true
