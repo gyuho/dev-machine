@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Development machine (arm64)"
+Description: "Development machine (amd64)"
 
 # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/parameters-section-structure.html
 Parameters:
@@ -41,50 +41,35 @@ Parameters:
     Default: ""
     Description: (Optional) Custom image ID. This value overrides any AWS Systems Manager Parameter Store value specified above.
 
+  # Make sure to use the same OS version as binary builder host
+  # otherwise, it can fail with:
+  # error while loading shared libraries: libssl.so.3: cannot open shared object file: No such file or directory
+  # https://ubuntu.com/server/docs/cloud-images/amazon-ec2
   # https://aws.amazon.com/blogs/compute/query-for-the-latest-amazon-linux-ami-ids-using-aws-systems-manager-parameter-store/
   ImageIdSsmParameter:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/arm64/hvm/ebs-gp2/ami-id
+    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    # Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/arm64/hvm/ebs-gp2/ami-id
     Description: AWS Systems Manager Parameter Store parameter of the AMI ID.
 
-  Arch:
+  ArchType:
     Type: String
-    Default: "arm64"
-    Description: The name of the architecture.
+    AllowedValues: ["amd64", "arm64"]
+    Default: "amd64"
+    # Default: "arm64"
+    Description: The name of the CPU architecture. Used for cloudwatch agent download links.
 
-  # Graviton 3 (in preview)
-  # https://aws.amazon.com/ec2/instance-types/c7g/
-  # c7g.large:   2 vCPU + 8  GiB RAM
-  # c7g.xlarge:  4 vCPU + 16 GiB RAM
-  # c7g.2xlarge: 8 vCPU + 32 GiB RAM
-  #
-  # Graviton 2
-  # https://aws.amazon.com/ec2/instance-types/c6g/
-  # c6g.large:   2 vCPU + 4  GiB RAM
-  # c6g.xlarge:  4 vCPU + 8  GiB RAM
-  # c6g.2xlarge: 8 vCPU + 16 GiB RAM
-  #
-  # Graviton 2
-  # https://aws.amazon.com/ec2/instance-types/m6g/
-  # m6g.large:   2 vCPU + 8  GiB RAM
-  # m6g.xlarge:  4 vCPU + 16 GiB RAM
-  # m6g.2xlarge: 8 vCPU + 32 GiB RAM
-  #
-  # Graviton 2
-  # https://aws.amazon.com/ec2/instance-types/r6g/
-  # r6g.large:   2 vCPU + 16 GiB RAM
-  # r6g.xlarge:  4 vCPU + 32 GiB RAM
-  # r6g.2xlarge: 8 vCPU + 64 GiB RAM
-  #
-  # Graviton 2
-  # https://aws.amazon.com/ec2/instance-types/t4/
-  # t4g.large:   2 vCPU + 8 GiB RAM
-  # t4g.xlarge:  4 vCPU + 16 GiB RAM
-  # t4g.2xlarge: 8 vCPU + 32 GiB RAM
-  #
+  RustOsType:
+    Type: String
+    AllowedValues: ["unknown", "ubuntu20.04"]
+    Default: "unknown"
+    Description: The name of the OS distribution and kind. Used for Rust binary download links.
+
+  # use https://github.com/gyuho/aws-manager/blob/main/src/ec2/mod.rs for better defaults
   InstanceTypes:
     Type: CommaDelimitedList
-    Default: c6g.4xlarge,m6g.4xlarge,r6g.4xlarge,t4g.2xlarge
+    Default: c6a.4xlarge,m6a.4xlarge,m5.4xlarge,c5.4xlarge
+    # Default: c6g.4xlarge,m6g.4xlarge,r6g.4xlarge,t4g.2xlarge
     Description: EC2 instance types
 
   InstanceTypesCount:
@@ -123,11 +108,35 @@ Parameters:
     Default: 500
     Description: The throughput to provision for a gp3 volume, with a maximum of 1,000 MiB/s.
 
+  # no need to have bigger values when each ASG only provisions one node
+  VolumeProvisionerInitialWaitRandomSeconds:
+    Type: Number
+    Default: 10
+    MinValue: 0
+    MaxValue: 500
+    Description: Only set non-zero if multiple instances may compete for the same EBS volume in the same zone.
+
   IpMode:
     Type: String
     AllowedValues: ["ephemeral", "elastic"]
     Default: "elastic"
     Description: Set "elastic" to allocate Elastic IP.
+
+  InstanceMode:
+    Type: String
+    AllowedValues: ["spot", "on-demand"]
+    Default: "spot"
+    Description: Set to "spot" to run spot instance.
+
+  AsgLaunchTemplateId:
+    Type: String
+    Default: ""
+    Description: (Optional) Non-empty to reuse.
+
+  AsgLaunchTemplateVersion:
+    Type: String
+    Default: ""
+    Description: (Optional) Non-empty to reuse.
 
   AsgName:
     Type: String
@@ -160,12 +169,6 @@ Parameters:
     Default: 1
     MinValue: 1
     MaxValue: 3
-
-  AsgSpotInstance:
-    Type: String
-    AllowedValues: ["true", "false"]
-    Default: "false"
-    Description: Set to "true" if the EC2 instance is set up with spot instance.
 
   OnDemandPercentageAboveBaseCapacity:
     Type: Number
@@ -212,7 +215,7 @@ Resources:
   AsgLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
-      LaunchTemplateName: !Join ["-", [!Ref Id, !Ref Arch]]
+      LaunchTemplateName: !Join ["-", [!Ref Id, !Ref ArchType]]
       LaunchTemplateData:
         # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-launchtemplatedata-iaminstanceprofile.html
         IamInstanceProfile:
@@ -249,7 +252,7 @@ Resources:
         TagSpecifications:
           - ResourceType: instance
             Tags:
-              - { Key: Name, Value: !Sub "${Id}-${Arch}" }
+              - { Key: Name, Value: !Sub "${Id}-${ArchType}" }
 
         # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-launchtemplatedata.html#cfn-ec2-launchtemplate-launchtemplatedata-userdata
         # https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/QuickStartEC2Instance.html
@@ -264,9 +267,8 @@ Resources:
               export DEBIAN_FRONTEND=noninteractive
 
               while [ 1 ]; do
-                sudo apt-get update -y \
-                && sudo apt-get upgrade -y \
-                && sudo apt-get install -y \
+                sudo apt-get update -y && sudo apt-get upgrade -y \
+                && sudo apt-get install -yq \
                 tmux zsh \
                 curl wget \
                 unzip zip gzip tar \
@@ -279,8 +281,11 @@ Resources:
               done;
 
               # http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+              # "x86_64" (mac, linux x86), "arm64" (M1), "aarch64" (graviton)
+              # https://aws.amazon.com/blogs/developer/aws-cli-v2-now-available-for-linux-arm/
               export LINUX_ARCH_TYPE=$(uname -m)
               echo LINUX_ARCH_TYPE: ${!LINUX_ARCH_TYPE}
+
               while [ 1 ]; do
                 sudo rm -f ./awscli-exe-linux-${!LINUX_ARCH_TYPE}.zip || true;
                 wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://awscli.amazonaws.com/awscli-exe-linux-${!LINUX_ARCH_TYPE}.zip
@@ -290,8 +295,6 @@ Resources:
               unzip ./awscli-exe-linux-${!LINUX_ARCH_TYPE}.zip
               sudo ./aws/install
               /usr/local/bin/aws --version
-
-              aws s3 ls s3://${S3BucketName}/
 
               # https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-ubuntu.html
               sudo snap install amazon-ssm-agent --classic
@@ -306,14 +309,30 @@ Resources:
               sudo mv /tmp/amazon-ssm-agent-10-restart-always.conf /etc/systemd/system/snap.amazon-ssm-agent.amazon-ssm-agent.service.d/10-restart-always.conf
               sudo systemctl start --no-block snap.amazon-ssm-agent.amazon-ssm-agent.service
 
-              # https://github.com/gyuho/volume-manager/releases
-              # "aarch64-unknown-linux-gnu" may not work without cross-linker for linux
-              # https://users.rust-lang.org/t/cant-cross-compile-project-with-openssl/70922
-              wget https://github.com/gyuho/volume-manager/releases/download/latest/aws-volume-provisioner.aarch64-ubuntu20.04-linux-gnu
-              mv ./aws-volume-provisioner.aarch64-ubuntu20.04-linux-gnu /tmp/aws-volume-provisioner
+              # https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/QuickStartEC2Instance.html
+              mkdir -p /tmp/install-cloudwatch-logs
+              while [ 1 ]; do
+                pushd /tmp/install-cloudwatch-logs
+                sudo rm -f ./amazon-cloudwatch-agent.deb || true;
+                wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/${ArchType}/latest/amazon-cloudwatch-agent.deb
+                popd
+                if [ $? = 0 ]; then break; fi; # check return value, break if successful (0)
+                sleep 2s;
+              done;
+              while [ 1 ]; do
+                echo "installing amazon-cloudwatch-agent"
+                pushd /tmp/install-cloudwatch-logs && sudo dpkg -i -E ./amazon-cloudwatch-agent.deb && popd
+                if [ $? = 0 ]; then break; fi; # check return value, break if successful (0)
+                sleep 2s;
+              done;
+
+              # https://github.com/ava-labs/volume-manager/releases
+              wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://github.com/ava-labs/volume-manager/releases/download/latest/aws-volume-provisioner.${!LINUX_ARCH_TYPE}-${RustOsType}-linux-gnu
+              mv ./aws-volume-provisioner.${!LINUX_ARCH_TYPE}-${RustOsType}-linux-gnu /tmp/aws-volume-provisioner
               chmod +x /tmp/aws-volume-provisioner
               /tmp/aws-volume-provisioner \
               --log-level=info \
+              --initial-wait-random-seconds=${VolumeProvisionerInitialWaitRandomSeconds} \
               --id-tag-key=Id \
               --id-tag-value=${Id} \
               --kind-tag-key=Kind \
@@ -329,15 +348,13 @@ Resources:
               --filesystem-name=ext4 \
               --mount-directory-path=/data
 
-              # https://github.com/gyuho/ip-manager/releases
-              # "aarch64-unknown-linux-gnu" may not work without cross-linker for linux
-              # https://users.rust-lang.org/t/cant-cross-compile-project-with-openssl/70922
+              # https://github.com/ava-labs/ip-manager/releases
               if [[ ${IpMode} == "elastic" ]]; then
-                sudo rm -f ./aws-ip-provisioner.aarch64-ubuntu20.04-linux-gnu
+                sudo rm -f ./aws-ip-provisioner.${!LINUX_ARCH_TYPE}-${RustOsType}-linux-gnu
                 sudo rm -f /tmp/aws-ip-provisioner
                 sudo rm -f /usr/local/bin/aws-ip-provisioner
-                wget https://github.com/gyuho/ip-manager/releases/download/latest/aws-ip-provisioner.aarch64-ubuntu20.04-linux-gnu
-                mv ./aws-ip-provisioner.aarch64-ubuntu20.04-linux-gnu /tmp/aws-ip-provisioner
+                wget --quiet --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=70 --continue https://github.com/ava-labs/ip-manager/releases/download/latest/aws-ip-provisioner.${!LINUX_ARCH_TYPE}-${RustOsType}-linux-gnu
+                mv ./aws-ip-provisioner.${!LINUX_ARCH_TYPE}-${RustOsType}-linux-gnu /tmp/aws-ip-provisioner
                 chmod +x /tmp/aws-ip-provisioner
                 sudo mv /tmp/aws-ip-provisioner /usr/local/bin/aws-ip-provisioner
 
@@ -380,7 +397,7 @@ Resources:
           - AlarmNotification
           - ScheduledActions
     Properties:
-      # AutoScalingGroupName: !Join ["-", [!Ref Id, !Ref Arch]]
+      # AutoScalingGroupName: !Join ["-", [!Ref Id, !Ref ArchType]]
       AutoScalingGroupName: !Ref AsgName
       MinSize: !Ref AsgMinSize
       MaxSize: !Ref AsgMaxSize
@@ -398,26 +415,29 @@ Resources:
           Value: !Ref AsgName
           PropagateAtLaunch: true
         - Key: ID
-          PropagateAtLaunch: true
           Value: !Ref Id
+          PropagateAtLaunch: true
         - Key: ARCH_TYPE
+          Value: !Ref ArchType
           PropagateAtLaunch: true
-          Value: arm64
-        - Key: OS_TYPE
+        - Key: RUST_OS_TYPE
+          Value: !Ref RustOsType
           PropagateAtLaunch: true
-          Value: linux
+        - Key: INSTANCE_MODE
+          Value: !Ref InstanceMode
+          PropagateAtLaunch: true
         - Key: ASG_SPOT_INSTANCE
           PropagateAtLaunch: true
           Value: !Ref AsgSpotInstance
         - Key: KMS_CMK_ARN
-          PropagateAtLaunch: true
           Value: !Ref KmsCmkArn
+          PropagateAtLaunch: true
         - Key: AAD_TAG
-          PropagateAtLaunch: true
           Value: !Ref AadTag
-        - Key: S3_BUCKET_NAME
           PropagateAtLaunch: true
+        - Key: S3_BUCKET_NAME
           Value: !Ref S3BucketName
+          PropagateAtLaunch: true
       # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-autoscaling-autoscalinggroup-mixedinstancespolicy.html
       # https://aws.amazon.com/getting-started/hands-on/ec2-auto-scaling-spot-instances/
       MixedInstancesPolicy:
