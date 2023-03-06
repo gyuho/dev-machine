@@ -375,7 +375,7 @@ pub async fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -
             .await
             .unwrap();
 
-        sleep(Duration::from_secs(10));
+        sleep(Duration::from_secs(10)).await;
         let stack = cloudformation_manager
             .poll_stack(
                 vpc_stack_name.as_str(),
@@ -716,7 +716,7 @@ aws ssm start-session --region {} --target {}
             .unwrap();
 
         log::info!("waiting for bootstrap and ready (to be safe)");
-        sleep(Duration::from_secs(20));
+        sleep(Duration::from_secs(20)).await;
     }
 
     println!();
