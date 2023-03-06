@@ -188,7 +188,7 @@ pub async fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
         s3_manager
             .put_object(
                 spec_file_path,
@@ -252,7 +252,7 @@ pub async fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
         s3_manager
             .put_object(
                 spec_file_path,
@@ -324,7 +324,7 @@ pub async fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
         s3_manager
             .put_object(
                 spec_file_path,
@@ -411,7 +411,7 @@ pub async fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
         s3_manager
             .put_object(
                 spec_file_path,
