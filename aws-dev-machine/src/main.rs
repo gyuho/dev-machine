@@ -8,7 +8,8 @@ const APP_NAME: &str = "dev-machine";
 
 /// Should be able to run with idempotency
 /// (e.g., multiple restarts should not recreate the same CloudFormation stacks)
-fn main() {
+#[tokio::main]
+async fn main() {
     let matches = Command::new(APP_NAME)
         .version(crate_version!())
         .about("Development machine provisioner")
@@ -62,6 +63,7 @@ fn main() {
                     .clone(),
                 sub_matches.get_flag("SKIP_PROMPT"),
             )
+            .await
             .unwrap();
         }
 
@@ -78,6 +80,7 @@ fn main() {
                 sub_matches.get_flag("DELETE_ALL"),
                 sub_matches.get_flag("SKIP_PROMPT"),
             )
+            .await
             .unwrap();
         }
 

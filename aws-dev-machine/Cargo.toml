@@ -10,7 +10,7 @@ name = "aws-dev-machine"
 path = "src/main.rs"
 
 [dependencies]
-aws-manager = { version = "0.24.19", features = ["cloudformation", "ec2", "kms", "s3", "sts"] } # https://crates.io/crates/aws-manager
+aws-manager = { version = "0.24.22", features = ["cloudformation", "ec2", "kms", "s3", "sts"] } # https://crates.io/crates/aws-manager
 aws-sdk-cloudformation = "0.24.0" # https://github.com/awslabs/aws-sdk-rust/releases
 aws-sdk-ec2 = "0.24.0" # https://github.com/awslabs/aws-sdk-rust/releases
 clap = { version = "4.1.8", features = ["cargo", "derive"] } # https://github.com/clap-rs/clap
@@ -21,9 +21,9 @@ env_logger = "0.10.0"
 id-manager = "0.0.3"
 log = "0.4.17"
 random-manager = "0.0.5"
-rust-embed = "6.4.2"
+rust-embed = "6.6.0"
 serde = { version = "1.0.152", features = ["derive"] }
-serde_yaml = "0.9.17" # https://github.com/dtolnay/serde-yaml/releases
+serde_yaml = "0.9.19" # https://github.com/dtolnay/serde-yaml/releases
 tokio = { version = "1.26.0", features = ["full"] } # https://github.com/tokio-rs/tokio/releases
 
 [dev-dependencies]

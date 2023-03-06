@@ -4,9 +4,6 @@ use std::{
     io::{self, stdout, Error, ErrorKind},
     os::unix::fs::PermissionsExt,
     path::Path,
-    sync::Arc,
-    thread,
-    time::Duration,
 };
 
 use aws_manager::{
@@ -22,7 +19,7 @@ use crossterm::{
 };
 use dialoguer::{theme::ColorfulTheme, Select};
 use rust_embed::RustEmbed;
-use tokio::runtime::Runtime;
+use tokio::time::{sleep, Duration};
 
 pub const NAME: &str = "apply";
 
@@ -60,7 +57,7 @@ pub fn command() -> Command {
 // 50-minute
 const MAX_WAIT_SECONDS: u64 = 50 * 60;
 
-pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::Result<()> {
+pub async fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::Result<()> {
     #[derive(RustEmbed)]
     #[folder = "cfn-templates/"]
     #[prefix = "cfn-templates/"]
@@ -74,15 +71,13 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
     let mut spec = aws_dev_machine::Spec::load(spec_file_path).unwrap();
     spec.validate()?;
 
-    let rt = Runtime::new().unwrap();
-
     let mut aws_resources = spec.aws_resources.clone().unwrap();
-    let shared_config = rt
-        .block_on(aws_manager::load_config(Some(aws_resources.region.clone())))
+    let shared_config = aws_manager::load_config(Some(aws_resources.region.clone()))
+        .await
         .unwrap();
 
     let sts_manager = sts::Manager::new(&shared_config);
-    let current_identity = rt.block_on(sts_manager.get_identity()).unwrap();
+    let current_identity = sts_manager.get_identity().await.unwrap();
 
     // validate identity
     match aws_resources.clone().identity {
@@ -153,34 +148,39 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
     let ec2_manager = ec2::Manager::new(&shared_config);
     let cloudformation_manager = cloudformation::Manager::new(&shared_config);
 
-    thread::sleep(Duration::from_secs(2));
+    sleep(Duration::from_secs(2)).await;
     execute!(
         stdout(),
         SetForegroundColor(Color::Green),
         Print("\n\n\nSTEP: create S3 bucket\n"),
         ResetColor
     )?;
-    rt.block_on(s3_manager.create_bucket(&aws_resources.bucket))
+    s3_manager
+        .create_bucket(&aws_resources.bucket)
+        .await
         .unwrap();
 
-    thread::sleep(Duration::from_secs(2));
-    rt.block_on(s3_manager.put_object(
-        Arc::new(spec_file_path.to_string()),
-        Arc::new(aws_resources.bucket.clone()),
-        Arc::new(aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode()),
-    ))
-    .unwrap();
+    sleep(Duration::from_secs(2)).await;
+    s3_manager
+        .put_object(
+            spec_file_path,
+            &aws_resources.bucket,
+            &aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
+        )
+        .await
+        .unwrap();
 
     if aws_resources.kms_cmk_id.is_none() && aws_resources.kms_cmk_arn.is_none() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Green),
             Print("\n\n\nSTEP: create KMS key\n"),
             ResetColor
         )?;
-        let key = rt
-            .block_on(kms_manager.create_symmetric_default_key(format!("{}-cmk", spec.id).as_str()))
+        let key = kms_manager
+            .create_symmetric_default_key(format!("{}-cmk", spec.id).as_str())
+            .await
             .unwrap();
 
         aws_resources.kms_cmk_id = Some(key.id);
@@ -188,24 +188,24 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        thread::sleep(Duration::from_secs(1));
-        rt.block_on(s3_manager.put_object(
-            Arc::new(spec_file_path.to_string()),
-            Arc::new(aws_resources.bucket.clone()),
-            Arc::new(
-                aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
-            ),
-        ))
-        .unwrap();
+        sleep(Duration::from_secs(1));
+        s3_manager
+            .put_object(
+                spec_file_path,
+                &aws_resources.bucket,
+                &aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
+            )
+            .await
+            .unwrap();
     }
     let envelope_manager = envelope::Manager::new(
-        kms_manager,
+        &kms_manager,
         aws_resources.kms_cmk_id.clone().unwrap(),
         "dev-machine".to_string(),
     );
 
     if aws_resources.ec2_key_path.is_none() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Green),
@@ -214,11 +214,13 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         )
         .unwrap();
         let ec2_key_path = get_ec2_key_path(spec_file_path);
-        rt.block_on(ec2_manager.create_key_pair(
-            aws_resources.ec2_key_name.clone().unwrap().as_str(),
-            ec2_key_path.as_str(),
-        ))
-        .unwrap();
+        ec2_manager
+            .create_key_pair(
+                aws_resources.ec2_key_name.clone().unwrap().as_str(),
+                ec2_key_path.as_str(),
+            )
+            .await
+            .unwrap();
 
         let tmp_compressed_path = random_manager::tmp_path(15, Some(".zstd")).unwrap();
         compress_manager::pack_file(
@@ -229,46 +231,43 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         .unwrap();
 
         let tmp_encrypted_path = random_manager::tmp_path(15, Some(".encrypted")).unwrap();
-        rt.block_on(envelope_manager.seal_aes_256_file(
-            Arc::new(tmp_compressed_path),
-            Arc::new(tmp_encrypted_path.clone()),
-        ))
-        .unwrap();
+        envelope_manager
+            .seal_aes_256_file(&tmp_compressed_path, &tmp_encrypted_path)
+            .await
+            .unwrap();
 
-        rt.block_on(
-            s3_manager.put_object(
-                Arc::new(tmp_encrypted_path),
-                Arc::new(aws_resources.bucket.clone()),
-                Arc::new(
-                    aws_dev_machine::StorageNamespace::Ec2AccessKeyCompressedEncrypted(
-                        spec.id.clone(),
-                    )
-                    .encode(),
-                ),
-            ),
-        )
-        .unwrap();
+        s3_manager
+            .put_object(
+                &tmp_encrypted_path,
+                &aws_resources.bucket,
+                &aws_dev_machine::StorageNamespace::Ec2AccessKeyCompressedEncrypted(
+                    spec.id.clone(),
+                )
+                .encode(),
+            )
+            .await
+            .unwrap();
 
         aws_resources.ec2_key_path = Some(ec2_key_path);
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        thread::sleep(Duration::from_secs(1));
-        rt.block_on(s3_manager.put_object(
-            Arc::new(spec_file_path.to_string()),
-            Arc::new(aws_resources.bucket.clone()),
-            Arc::new(
-                aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
-            ),
-        ))
-        .unwrap();
+        sleep(Duration::from_secs(1));
+        s3_manager
+            .put_object(
+                spec_file_path,
+                &aws_resources.bucket,
+                &aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
+            )
+            .await
+            .unwrap();
     }
 
     if aws_resources
         .cloudformation_ec2_instance_profile_arn
         .is_none()
     {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Green),
@@ -284,30 +283,34 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
             .clone()
             .unwrap();
 
-        rt.block_on(cloudformation_manager.create_stack(
-            ec2_instance_role_stack_name.as_str(),
-            Some(vec![Capability::CapabilityNamedIam]),
-            OnFailure::Delete,
-            ec2_instance_role_tmpl,
-            Some(Vec::from([
-                Tag::builder().key("KIND").value("dev-machine").build(),
-            ])),
-            Some(Vec::from([
-                build_param("Id", &spec.id),
-                build_param("KmsCmkArn", &aws_resources.kms_cmk_arn.clone().unwrap()),
-                build_param("S3BucketName", &aws_resources.bucket),
-            ])),
-        ))
-        .unwrap();
+        cloudformation_manager
+            .create_stack(
+                ec2_instance_role_stack_name.as_str(),
+                Some(vec![Capability::CapabilityNamedIam]),
+                OnFailure::Delete,
+                ec2_instance_role_tmpl,
+                Some(Vec::from([Tag::builder()
+                    .key("KIND")
+                    .value("dev-machine")
+                    .build()])),
+                Some(Vec::from([
+                    build_param("Id", &spec.id),
+                    build_param("KmsCmkArn", &aws_resources.kms_cmk_arn.clone().unwrap()),
+                    build_param("S3BucketName", &aws_resources.bucket),
+                ])),
+            )
+            .await
+            .unwrap();
 
-        thread::sleep(Duration::from_secs(10));
-        let stack = rt
-            .block_on(cloudformation_manager.poll_stack(
+        sleep(Duration::from_secs(10)).await;
+        let stack = cloudformation_manager
+            .poll_stack(
                 ec2_instance_role_stack_name.as_str(),
                 StackStatus::CreateComplete,
                 Duration::from_secs(500),
                 Duration::from_secs(30),
-            ))
+            )
+            .await
             .unwrap();
 
         for o in stack.outputs.unwrap() {
@@ -321,22 +324,22 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        thread::sleep(Duration::from_secs(1));
-        rt.block_on(s3_manager.put_object(
-            Arc::new(spec_file_path.to_string()),
-            Arc::new(aws_resources.bucket.clone()),
-            Arc::new(
-                aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
-            ),
-        ))
-        .unwrap();
+        sleep(Duration::from_secs(1));
+        s3_manager
+            .put_object(
+                spec_file_path,
+                &aws_resources.bucket,
+                &aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
+            )
+            .await
+            .unwrap();
     }
 
     if aws_resources.cloudformation_vpc_id.is_none()
         && aws_resources.cloudformation_vpc_security_group_id.is_none()
         && aws_resources.cloudformation_vpc_public_subnet_ids.is_none()
     {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Green),
@@ -357,26 +360,30 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
             build_param("SshPortIngressIpv4Range", "0.0.0.0/0"),
             build_param("HttpPortIngressIpv4Range", "0.0.0.0/0"),
         ]);
-        rt.block_on(cloudformation_manager.create_stack(
-            vpc_stack_name.as_str(),
-            None,
-            OnFailure::Delete,
-            vpc_tmpl,
-            Some(Vec::from([
-                Tag::builder().key("KIND").value("dev-machine").build(),
-            ])),
-            Some(parameters),
-        ))
-        .unwrap();
+        cloudformation_manager
+            .create_stack(
+                vpc_stack_name.as_str(),
+                None,
+                OnFailure::Delete,
+                vpc_tmpl,
+                Some(Vec::from([Tag::builder()
+                    .key("KIND")
+                    .value("dev-machine")
+                    .build()])),
+                Some(parameters),
+            )
+            .await
+            .unwrap();
 
-        thread::sleep(Duration::from_secs(10));
-        let stack = rt
-            .block_on(cloudformation_manager.poll_stack(
+        sleep(Duration::from_secs(10));
+        let stack = cloudformation_manager
+            .poll_stack(
                 vpc_stack_name.as_str(),
                 StackStatus::CreateComplete,
                 Duration::from_secs(300),
                 Duration::from_secs(30),
-            ))
+            )
+            .await
             .unwrap();
 
         for o in stack.outputs.unwrap() {
@@ -404,15 +411,15 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        thread::sleep(Duration::from_secs(1));
-        rt.block_on(s3_manager.put_object(
-            Arc::new(spec_file_path.to_string()),
-            Arc::new(aws_resources.bucket.clone()),
-            Arc::new(
-                aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
-            ),
-        ))
-        .unwrap();
+        sleep(Duration::from_secs(1));
+        s3_manager
+            .put_object(
+                spec_file_path,
+                &aws_resources.bucket,
+                &aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id.clone()).encode(),
+            )
+            .await
+            .unwrap();
     }
 
     let is_spot_instance = spec.machine.instance_mode == String::from("spot");
@@ -484,7 +491,7 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
     }
 
     if spec.machine.machines > 0 && aws_resources.cloudformation_asg_logical_id.is_none() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Green),
@@ -525,31 +532,35 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
             format!("{}", desired_capacity).as_str(),
         ));
 
-        rt.block_on(cloudformation_manager.create_stack(
-            cloudformation_asg_stack_name.as_str(),
-            None,
-            OnFailure::Delete,
-            cloudformation_asg_tmpl,
-            Some(Vec::from([
-                Tag::builder().key("KIND").value("dev-machine").build(),
-            ])),
-            Some(parameters),
-        ))
-        .unwrap();
+        cloudformation_manager
+            .create_stack(
+                cloudformation_asg_stack_name.as_str(),
+                None,
+                OnFailure::Delete,
+                cloudformation_asg_tmpl,
+                Some(Vec::from([Tag::builder()
+                    .key("KIND")
+                    .value("dev-machine")
+                    .build()])),
+                Some(parameters),
+            )
+            .await
+            .unwrap();
 
         // add 5-minute for ELB creation
         let mut wait_secs = 300 + 60 * desired_capacity as u64;
         if wait_secs > MAX_WAIT_SECONDS {
             wait_secs = MAX_WAIT_SECONDS;
         }
-        thread::sleep(Duration::from_secs(30));
-        let stack = rt
-            .block_on(cloudformation_manager.poll_stack(
+        sleep(Duration::from_secs(30)).await;
+        let stack = cloudformation_manager
+            .poll_stack(
                 cloudformation_asg_stack_name.as_str(),
                 StackStatus::CreateComplete,
                 Duration::from_secs(wait_secs),
                 Duration::from_secs(30),
-            ))
+            )
+            .await
             .unwrap();
 
         for o in stack.outputs.unwrap() {
@@ -578,7 +589,7 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
                 "fetching all droplets for dev-machine SSH access (target nodes {})",
                 target_nodes
             );
-            droplets = rt.block_on(ec2_manager.list_asg(&asg_name)).unwrap();
+            droplets = ec2_manager.list_asg(&asg_name).await.unwrap();
             if (droplets.len() as u32) >= target_nodes {
                 break;
             }
@@ -586,18 +597,16 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
                 "retrying fetching all droplets (only got {})",
                 droplets.len()
             );
-            thread::sleep(Duration::from_secs(30));
+            sleep(Duration::from_secs(30)).await;
         }
 
         let mut eips = Vec::new();
         if spec.machine.ip_mode == String::from("elastic") {
             log::info!("using elastic IPs... wait more");
             loop {
-                eips = rt
-                    .block_on(ec2_manager.describe_eips_by_tags(HashMap::from([(
-                        String::from("Id"),
-                        spec.id.clone(),
-                    )])))
+                eips = ec2_manager
+                    .describe_eips_by_tags(HashMap::from([(String::from("Id"), spec.id.clone())]))
+                    .await
                     .unwrap();
 
                 log::info!("got {} EIP addresses", eips.len());
@@ -610,7 +619,7 @@ pub fn execute(log_level: &str, spec_file_path: &str, skip_prompt: bool) -> io::
                     break;
                 }
 
-                thread::sleep(Duration::from_secs(30));
+                sleep(Duration::from_secs(30)).await;
             }
         }
 
@@ -696,16 +705,18 @@ aws ssm start-session --region {} --target {}
         spec.aws_resources = Some(aws_resources.clone());
         spec.sync(spec_file_path)?;
 
-        thread::sleep(Duration::from_secs(1));
-        rt.block_on(s3_manager.put_object(
-            Arc::new(spec_file_path.to_string()),
-            Arc::new(aws_resources.bucket),
-            Arc::new(aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id).encode()),
-        ))
-        .unwrap();
+        sleep(Duration::from_secs(1)).await;
+        s3_manager
+            .put_object(
+                spec_file_path,
+                &aws_resources.bucket,
+                &aws_dev_machine::StorageNamespace::DevMachineConfigFile(spec.id).encode(),
+            )
+            .await
+            .unwrap();
 
         log::info!("waiting for bootstrap and ready (to be safe)");
-        thread::sleep(Duration::from_secs(20));
+        sleep(Duration::from_secs(20));
     }
 
     println!();

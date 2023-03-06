@@ -3,9 +3,6 @@ use std::{
     fs,
     io::{self, stdout, Error, ErrorKind},
     path::Path,
-    sync::Arc,
-    thread,
-    time::Duration,
 };
 
 use aws_manager::{self, cloudformation, ec2, kms, s3, sts};
@@ -17,7 +14,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
 };
 use dialoguer::{theme::ColorfulTheme, Select};
-use tokio::runtime::Runtime;
+use tokio::time::{sleep, Duration};
 
 pub const NAME: &str = "delete";
 
@@ -63,7 +60,7 @@ pub fn command() -> Command {
 // 50-minute
 const MAX_WAIT_SECONDS: u64 = 50 * 60;
 
-pub fn execute(
+pub async fn execute(
     log_level: &str,
     spec_file_path: &str,
     delete_all: bool,
@@ -77,13 +74,12 @@ pub fn execute(
     let spec = aws_dev_machine::Spec::load(spec_file_path).unwrap();
     let aws_resources = spec.aws_resources.clone().unwrap();
 
-    let rt = Runtime::new().unwrap();
-    let shared_config = rt
-        .block_on(aws_manager::load_config(Some(aws_resources.region.clone())))
+    let shared_config = aws_manager::load_config(Some(aws_resources.region.clone()))
+        .await
         .unwrap();
 
     let sts_manager = sts::Manager::new(&shared_config);
-    let current_identity = rt.block_on(sts_manager.get_identity()).unwrap();
+    let current_identity = sts_manager.get_identity().await.unwrap();
 
     // validate identity
     match aws_resources.identity {
@@ -138,7 +134,7 @@ pub fn execute(
     // delete this first since EC2 key delete does not depend on ASG/VPC
     // (mainly to speed up delete operation)
     if aws_resources.ec2_key_name.is_some() && aws_resources.ec2_key_path.is_some() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -158,14 +154,16 @@ pub fn execute(
         if Path::new(ec2_key_path_compressed_encrypted.as_str()).exists() {
             fs::remove_file(ec2_key_path_compressed_encrypted.as_str()).unwrap();
         }
-        rt.block_on(ec2_manager.delete_key_pair(aws_resources.ec2_key_name.unwrap().as_str()))
+        ec2_manager
+            .delete_key_pair(aws_resources.ec2_key_name.unwrap().as_str())
+            .await
             .unwrap();
     }
 
     // delete this first since KMS key delete does not depend on ASG/VPC
     // (mainly to speed up delete operation)
     if aws_resources.kms_cmk_id.is_some() && aws_resources.kms_cmk_arn.is_some() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -174,7 +172,9 @@ pub fn execute(
         )?;
 
         let cmk_id = aws_resources.kms_cmk_id.unwrap();
-        rt.block_on(kms_manager.schedule_to_delete(cmk_id.as_str(), 7))
+        kms_manager
+            .schedule_to_delete(cmk_id.as_str(), 7)
+            .await
             .unwrap();
     }
 
@@ -183,7 +183,7 @@ pub fn execute(
         .cloudformation_ec2_instance_profile_arn
         .is_some()
     {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -195,12 +195,14 @@ pub fn execute(
             .cloudformation_ec2_instance_role
             .clone()
             .unwrap();
-        rt.block_on(cloudformation_manager.delete_stack(ec2_instance_role_stack_name.as_str()))
+        cloudformation_manager
+            .delete_stack(ec2_instance_role_stack_name.as_str())
+            .await
             .unwrap();
     }
 
     if spec.machine.machines > 0 && aws_resources.cloudformation_asg_logical_id.is_some() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -209,12 +211,14 @@ pub fn execute(
         )?;
 
         let asg_stack_name = aws_resources.cloudformation_asg.clone().unwrap();
-        rt.block_on(cloudformation_manager.delete_stack(asg_stack_name.as_str()))
+        cloudformation_manager
+            .delete_stack(asg_stack_name.as_str())
+            .await
             .unwrap();
     }
 
     if spec.machine.machines > 0 && aws_resources.cloudformation_asg_logical_id.is_some() {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -229,13 +233,15 @@ pub fn execute(
         if wait_secs > MAX_WAIT_SECONDS {
             wait_secs = MAX_WAIT_SECONDS;
         }
-        rt.block_on(cloudformation_manager.poll_stack(
-            asg_stack_name.as_str(),
-            StackStatus::DeleteComplete,
-            Duration::from_secs(wait_secs),
-            Duration::from_secs(30),
-        ))
-        .unwrap();
+        cloudformation_manager
+            .poll_stack(
+                asg_stack_name.as_str(),
+                StackStatus::DeleteComplete,
+                Duration::from_secs(wait_secs),
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap();
     }
 
     // VPC delete must run after associated EC2 instances are terminated due to dependencies
@@ -243,7 +249,7 @@ pub fn execute(
         && aws_resources.cloudformation_vpc_security_group_id.is_some()
         && aws_resources.cloudformation_vpc_public_subnet_ids.is_some()
     {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -252,23 +258,27 @@ pub fn execute(
         )?;
 
         let vpc_stack_name = aws_resources.cloudformation_vpc.unwrap();
-        rt.block_on(cloudformation_manager.delete_stack(vpc_stack_name.as_str()))
+        cloudformation_manager
+            .delete_stack(vpc_stack_name.as_str())
+            .await
             .unwrap();
-        thread::sleep(Duration::from_secs(10));
-        rt.block_on(cloudformation_manager.poll_stack(
-            vpc_stack_name.as_str(),
-            StackStatus::DeleteComplete,
-            Duration::from_secs(500),
-            Duration::from_secs(30),
-        ))
-        .unwrap();
+        sleep(Duration::from_secs(10)).await;
+        cloudformation_manager
+            .poll_stack(
+                vpc_stack_name.as_str(),
+                StackStatus::DeleteComplete,
+                Duration::from_secs(500),
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap();
     }
 
     if aws_resources
         .cloudformation_ec2_instance_profile_arn
         .is_some()
     {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -277,17 +287,19 @@ pub fn execute(
         )?;
 
         let ec2_instance_role_stack_name = aws_resources.cloudformation_ec2_instance_role.unwrap();
-        rt.block_on(cloudformation_manager.poll_stack(
-            ec2_instance_role_stack_name.as_str(),
-            StackStatus::DeleteComplete,
-            Duration::from_secs(500),
-            Duration::from_secs(30),
-        ))
-        .unwrap();
+        cloudformation_manager
+            .poll_stack(
+                ec2_instance_role_stack_name.as_str(),
+                StackStatus::DeleteComplete,
+                Duration::from_secs(500),
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap();
     }
 
     if delete_all {
-        thread::sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(2)).await;
         execute!(
             stdout(),
             SetForegroundColor(Color::Red),
@@ -295,9 +307,13 @@ pub fn execute(
             ResetColor
         )?;
 
-        rt.block_on(s3_manager.delete_objects(Arc::new(aws_resources.bucket.clone()), None))
+        s3_manager
+            .delete_objects(&aws_resources.bucket, None)
+            .await
             .unwrap();
-        rt.block_on(s3_manager.delete_bucket(&aws_resources.bucket))
+        s3_manager
+            .delete_bucket(&aws_resources.bucket)
+            .await
             .unwrap();
     }
 
@@ -318,19 +334,21 @@ pub fn execute(
             .set_values(Some(vec![spec.id.clone()]))
             .build(),
     ];
-    let volumes = rt
-        .block_on(ec2_manager.describe_volumes(Some(filters)))
-        .unwrap();
+    let volumes = ec2_manager.describe_volumes(Some(filters)).await.unwrap();
     log::info!("found {} volumes", volumes.len());
     if !volumes.is_empty() {
         log::info!("deleting {} volumes", volumes.len());
-        let ec2_cli = ec2_manager.client();
         for v in volumes {
             let volume_id = v.volume_id().unwrap().to_string();
             log::info!("deleting EBS volume '{}'", volume_id);
-            rt.block_on(ec2_cli.delete_volume().volume_id(volume_id).send())
+            ec2_manager
+                .cli
+                .delete_volume()
+                .volume_id(volume_id)
+                .send()
+                .await
                 .unwrap();
-            thread::sleep(Duration::from_secs(2));
+            sleep(Duration::from_secs(2)).await;
         }
     }
 
@@ -340,26 +358,23 @@ pub fn execute(
         Print("\n\n\nSTEP: deleting orphaned EIPs\n"),
         ResetColor
     )?;
-    let eips = rt
-        .block_on(
-            ec2_manager
-                .describe_eips_by_tags(HashMap::from([(String::from("Id"), spec.id.clone())])),
-        )
+    let eips = ec2_manager
+        .describe_eips_by_tags(HashMap::from([(String::from("Id"), spec.id.clone())]))
+        .await
         .unwrap();
     log::info!("found {} EIP addresses", eips.len());
     for eip_addr in eips.iter() {
         let allocation_id = eip_addr.allocation_id.to_owned().unwrap();
-        let ec2_cli = ec2_manager.client();
 
         log::info!("releasing EIP '{}'", allocation_id);
-        rt.block_on(
-            ec2_cli
-                .release_address()
-                .allocation_id(allocation_id)
-                .send(),
-        )
-        .unwrap();
-        thread::sleep(Duration::from_secs(2));
+        ec2_manager
+            .cli
+            .release_address()
+            .allocation_id(allocation_id)
+            .send()
+            .await
+            .unwrap();
+        sleep(Duration::from_secs(2)).await;
     }
 
     println!();
